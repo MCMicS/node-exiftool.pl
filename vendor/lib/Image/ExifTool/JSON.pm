@@ -14,15 +14,13 @@ use vars qw($VERSION);
 use Image::ExifTool qw(:DataAccess :Utils);
 use Image::ExifTool::Import;
 
-$VERSION = '1.03';
+$VERSION = '1.02';
 
-sub ProcessJSON($$);
 sub ProcessTag($$$$%);
 
 %Image::ExifTool::JSON::Main = (
     GROUPS => { 0 => 'JSON', 1 => 'JSON', 2 => 'Other' },
     VARS => { NO_ID => 1 },
-    PROCESS_PROC => \&ProcessJSON,
     NOTES => q{
         Other than a few tags in the table below, JSON tags have not been
         pre-defined.  However, ExifTool will read any existing tags from basic
@@ -105,26 +103,7 @@ sub ProcessJSON($$)
     my ($et, $dirInfo) = @_;
     my $raf = $$dirInfo{RAF};
     my $structOpt = $et->Options('Struct');
-    my (%database, $key, $tag, $dataPt);
-
-    unless ($raf) {
-        $dataPt = $$dirInfo{DataPt};
-        if ($$dirInfo{DirStart} or ($$dirInfo{DirLen} and $$dirInfo{DirLen} ne length($$dataPt))) {
-            my $buff = substr(${$$dirInfo{DataPt}}, $$dirInfo{DirStart}, $$dirInfo{DirLen});
-            $dataPt = \$buff;
-        }
-        $raf = new File::RandomAccess($dataPt);
-        # extract as a block if requested
-        my $blockName = $$dirInfo{BlockInfo} ? $$dirInfo{BlockInfo}{Name} : '';
-        my $blockExtract = $et->Options('BlockExtract');
-        if ($blockName and ($blockExtract or $$et{REQ_TAG_LOOKUP}{lc $blockName} or
-            ($$et{TAGS_FROM_FILE} and not $$et{EXCL_TAG_LOOKUP}{lc $blockName})))
-        {
-            $et->FoundTag($$dirInfo{BlockInfo}, $$dataPt);
-            return 1 if $blockExtract and $blockExtract > 1;
-        }
-        $et->VerboseDir('JSON');
-    }
+    my (%database, $key, $tag);
 
     # read information from JSON file into database structure
     my $err = Image::ExifTool::Import::ReadJSON($raf, \%database,
@@ -132,7 +111,7 @@ sub ProcessJSON($$)
 
     return 0 if $err or not %database;
 
-    $et->SetFileType() unless $dataPt;
+    $et->SetFileType();
 
     my $tagTablePtr = GetTagTable('Image::ExifTool::JSON::Main');
 

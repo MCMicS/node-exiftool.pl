@@ -15,7 +15,7 @@ use Image::ExifTool::Exif;
 use Image::ExifTool::XMP;
 use Image::ExifTool::GPS;
 
-$VERSION = '1.04';
+$VERSION = '1.03';
 
 my %convFloat2 = (
     PrintConv => 'sprintf("%+.2f", $val)',
@@ -90,20 +90,20 @@ my %convFloat2 = (
         Writable => 'real',
         Avoid => 1,
         PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "N")',
-        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lat")',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
     },
     GpsLongtitude => { # (sic)
         Name => 'GPSLongtitude',
         Writable => 'real',
         PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "E")',
-        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lon")',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
     },
     GpsLongitude => { #PH (NC)
         Name => 'GPSLongitude',
         Writable => 'real',
         Avoid => 1,
         PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "E")',
-        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lon")',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
     },
     FlightXSpeed  => { Writable => 'real' },
     FlightYSpeed  => { Writable => 'real' },
@@ -124,13 +124,13 @@ my %convFloat2 = (
         Name => 'Latitude',
         Writable => 'real',
         PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "N")',
-        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lat")',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
     },
     Longitude => {
         Name => 'Longitude',
         Writable => 'real',
         PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "E")',
-        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lon")',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
     },
 );
 

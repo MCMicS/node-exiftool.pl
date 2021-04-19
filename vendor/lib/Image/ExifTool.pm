@@ -28,7 +28,7 @@ use vars qw($VERSION $RELEASE @ISA @EXPORT_OK %EXPORT_TAGS $AUTOLOAD @fileTypes
             %mimeType $swapBytes $swapWords $currentByteOrder %unpackStd
             %jpegMarker %specialTags %fileTypeLookup $testLen $exePath);
 
-$VERSION = '12.23';
+$VERSION = '12.16';
 $RELEASE = '';
 @ISA = qw(Exporter);
 %EXPORT_TAGS = (
@@ -42,7 +42,7 @@ $RELEASE = '';
     DataAccess => [qw(
         ReadValue GetByteOrder SetByteOrder ToggleByteOrder Get8u Get8s Get16u
         Get16s Get32u Get32s Get64u GetFloat GetDouble GetFixed32s Write
-        WriteValue Tell Set8u Set8s Set16u Set32u Set64u Set64s
+        WriteValue Tell Set8u Set8s Set16u Set32u Set64u
     )],
     Utils => [qw(GetTagTable TagTableKeys GetTagInfoList AddTagToTable HexDump)],
     Vars  => [qw(%allTables @tableOrder @fileTypes)],
@@ -70,7 +70,7 @@ sub SetFileName($$;$$$);
 sub SetSystemTags($$);
 sub GetAllTags(;$);
 sub GetWritableTags(;$);
-sub GetAllGroups($;$);
+sub GetAllGroups($);
 sub GetNewGroups($);
 sub GetDeleteGroups();
 sub AddUserDefinedTags($%);
@@ -89,7 +89,6 @@ sub Get64u($$);
 sub GetFixed64s($$);
 sub GetExtended($$);
 sub Set64u(@);
-sub Set64s(@);
 sub DecodeBits($$;$);
 sub EncodeBits($$;$$);
 sub Filter($$$);
@@ -201,7 +200,7 @@ my %writeTypes; # lookup for writable file types (hash filled if required)
 %noWriteFile = (
     TIFF => [ qw(3FR DCR K25 KDC SRF) ],
     XMP  => [ qw(SVG INX) ],
-    JP2  => [ qw(J2C JPC JXC) ],
+    JP2  => [ qw(J2C JPC) ],
     MOV  => [ qw(INSV) ],
 );
 
@@ -267,7 +266,6 @@ my %createTypes = map { $_ => 1 } qw(XMP ICC MIE VRD DR4 EXIF EXV);
     DIB  => ['BMP',  'Device Independent Bitmap'],
     DIC  =>  'DICM',
     DICM => ['DICOM','Digital Imaging and Communications in Medicine'],
-    DIR  => ['DIR',  'Directory'],
     DIVX => ['ASF',  'DivX media format'],
     DJV  =>  'DJVU',
     DJVU => ['AIFF', 'DjVu image'],
@@ -355,8 +353,6 @@ my %createTypes = map { $_ => 1 } qw(XMP ICC MIE VRD DR4 EXIF EXV);
     JPM  => ['JP2',  'JPEG 2000 compound image'],
     JPX  => ['JP2',  'JPEG 2000 with extensions'],
     JSON => ['JSON', 'JavaScript Object Notation'],
-    JXC  => ['JP2', 'JPEG XL Codestream'], # (JXC = PH invention, not a real extension)
-    JXL  => ['JP2', 'JPEG XL'],
     JXR  => ['TIFF', 'JPEG XR'],
     K25  => ['TIFF', 'Kodak DC25 RAW'],
     KDC  => ['TIFF', 'Kodak Digital Camera RAW'],
@@ -420,7 +416,6 @@ my %createTypes = map { $_ => 1 } qw(XMP ICC MIE VRD DR4 EXIF EXV);
     ONP  => ['JSON', 'ON1 Presets'],
     OPUS => ['OGG',  'Ogg Opus audio file'],
     ORF  => ['ORF',  'Olympus RAW format'],
-    ORI  =>  'ORF',
     OTF  => ['Font', 'Open Type Font'],
     PAC  => ['RIFF', 'Lossless Predictive Audio Compression'],
     PAGES => ['ZIP', 'Apple Pages document'],
@@ -654,8 +649,6 @@ my %fileDescription = (
     JPM  => 'image/jpm',
     JPX  => 'image/jpx',
     JSON => 'application/json',
-    JXC  => 'image/x-jxc', #PH (invented)
-    JXL  => 'image/jxl', #PH (NC)
     JXR  => 'image/jxr',
     K25  => 'image/x-kodak-k25',
     KDC  => 'image/x-kodak-kdc',
@@ -818,7 +811,6 @@ my %moduleName = (
     HDR  => 'Radiance',
     JP2  => 'Jpeg2000',
     JPEG => '',
-    JXL  => 'Jpeg2000',
     LFP  => 'Lytro',
     LRI  => 0,
     MOV  => 'QuickTime',
@@ -902,7 +894,7 @@ $testLen = 1024;    # number of bytes to read when testing for magic number
     IND  => '\x06\x06\xed\xf5\xd8\x1d\x46\xe5\xbd\x31\xef\xe7\xfe\x74\xb7\x1d',
   # ISO  =>  signature is at byte 32768
     ITC  => '.{4}itch',
-    JP2  => '(\0\0\0\x0cjP(  |\x1a\x1a)\x0d\x0a\x87\x0a|\xff\x4f\xff\x51\0|\xff\x0a|\0\0\0\x0cJXL \x0d\x0a......ftypjxl )',
+    JP2  => '(\0\0\0\x0cjP(  |\x1a\x1a)\x0d\x0a\x87\x0a|\xff\x4f\xff\x51\0)',
     JPEG => '\xff\xd8\xff',
     JSON => '(\xef\xbb\xbf)?\s*(\[\s*)?\{\s*"[^"]*"\s*:',
     LFP  => '\x89LFP\x0d\x0a\x1a\x0a',
@@ -1137,13 +1129,6 @@ my %systemTagsNotes = (
         RawConv => '$self->ConvertFileName($val)',
         ValueConvInv => '$self->InverseFileName($val)',
     },
-    BaseName => {
-        Groups => { 1 => 'System', 2 => 'Other' },
-        Notes => q{
-            file name without extension. Not generated unless specifically requested or
-            the L<RequestAll|../ExifTool.html#RequestAll> API option is set
-        },
-    },
     FilePath => {
         Groups => { 1 => 'System', 2 => 'Other' },
         Notes => q{
@@ -1285,19 +1270,10 @@ my %systemTagsNotes = (
         WritePseudo => 1,
         DelCheck => q{"Can't delete"},
         Protected => 1, # all writable pseudo-tags must be protected!
-        ValueConv => 'sprintf("%.3o", $val)',
-        ValueConvInv => 'oct($val & 07777)',
+        ValueConv => 'sprintf("%.3o", $val & 0777)',
+        ValueConvInv => 'oct($val)',
         PrintConv => sub {
-            my ($mask, $val) = (0400, oct(shift));
-            my %types = (
-                0010000 => 'p',
-                0020000 => 'c',
-                0040000 => 'd',
-                0060000 => 'b',
-                0120000 => 'l',
-                0140000 => 's',
-            );
-            my $str = $types{$val & 0170000} || '-';
+            my ($mask, $str, $val) = (0400, '', oct(shift));
             while ($mask) {
                 foreach (qw(r w x)) {
                     $str .= $val & $mask ? $_ : '-';
@@ -1308,7 +1284,6 @@ my %systemTagsNotes = (
         },
         PrintConvInv => sub {
             my ($bit, $val, $str) = (8, 0, shift);
-            $str = substr($str, 1) if length($str) == 10;
             return undef if length($str) != 9;
             while ($bit >= 0) {
                 foreach (qw(r w x)) {
@@ -1762,10 +1737,7 @@ my %systemTagsNotes = (
     EmbeddedVideo => { Groups => { 0 => 'Trailer', 2 => 'Video' } },
     Trailer => {
         Groups => { 0 => 'Trailer' },
-        Notes => q{
-            the full JPEG trailer data block.  Extracted only if specifically requested
-            or the RequestAll API option is set to 3 or higher
-        },
+        Notes => 'the full JPEG trailer data block.  Extracted only if specifically requested',
         Writable => 1,
         Protected => 1,
     },
@@ -2299,7 +2271,7 @@ sub ClearOptions($)
         NoPDFList   => undef,   # flag to avoid splitting PDF List-type tag values
         Password    => undef,   # password for password-protected PDF documents
         PrintConv   => 1,       # flag to enable print conversion
-        QuickTimeHandler => 1,  # flag to add mdir Handler to newly created Meta box
+        QuickTimeHandler => undef,  # flag to add mdir Handler to newly created Meta box
         QuickTimeUTC=> undef,   # assume that QuickTime date/time tags are stored as UTC
         RequestAll  => undef,   # extract all tags that must be specifically requested
         RequestTags => undef,   # extra tags to request (on top of those in the tag list)
@@ -2349,7 +2321,7 @@ sub ExtractInfo($;@)
     my $fast = $$options{FastScan} || 0;
     my $req = $$self{REQ_TAG_LOOKUP};
     my $reqAll = $$options{RequestAll} || 0;
-    my (%saveOptions, $reEntry, $rsize, $type, @startTime, $saveOrder, $isDir);
+    my (%saveOptions, $reEntry, $rsize, $type, @startTime, $saveOrder);
 
     # check for internal ReEntry option to allow recursive calls to ExtractInfo
     if (ref $_[1] eq 'HASH' and $_[1]{ReEntry} and
@@ -2422,11 +2394,6 @@ sub ExtractInfo($;@)
                 $realname =~ /\|$/ and $realname =~ s/^.*?"(.*?)".*/$1/s;
                 my ($dir, $name) = SplitFileName($realname);
                 $self->FoundTag('FileName', $name);
-                if ($$req{basename} or
-                   ($reqAll and not $$self{EXCL_TAG_LOOKUP}{basename}))
-                {
-                    $self->FoundTag('BaseName', $name =~ /(.*)\./ ? $1 : $name);
-                }
                 $self->FoundTag('Directory', $dir) if defined $dir and length $dir;
                 if ($$req{filepath} or
                    ($reqAll and not $$self{EXCL_TAG_LOOKUP}{filepath}))
@@ -2450,8 +2417,6 @@ sub ExtractInfo($;@)
                 # in Windows cmd shell pipe even though it really failed
                 $$raf{TESTED} = -1 if $filename eq '-' or $filename =~ /\|$/;
                 $$self{RAF} = $raf;
-            } elsif ($self->IsDirectory($filename)) {
-                $isDir = 1;
             } else {
                 $self->Error('Error opening file');
             }
@@ -2460,34 +2425,28 @@ sub ExtractInfo($;@)
         }
     }
 
-    while ($raf or $isDir) {
-        my (@stat, $plainFile);
+    while ($raf) {
+        my (@stat, $fileSize);
         if ($reEntry) {
             # we already set these tags
-        } elsif (not $raf) {
-            @stat = stat $filename;
         } elsif (not $$raf{FILE_PT}) {
             # get file size from image in memory
             $self->FoundTag('FileSize', length ${$$raf{BUFF_PT}});
         } elsif (-f $$raf{FILE_PT}) {
             # get file tags if this is a plain file
+            $fileSize = -s _;
             @stat = stat _;
-            $plainFile = 1;
-            # hack to patch Windows daylight savings time bug
-            @stat[8,9,10] = $self->GetFileTime($$raf{FILE_PT}) if $^O eq 'MSWin32';
+            my ($aTime, $mTime, $cTime) = $self->GetFileTime($$raf{FILE_PT});
+            $self->FoundTag('FileSize', $fileSize) if defined $fileSize;
+            $self->FoundTag('ResourceForkSize', $rsize) if $rsize;
+            $self->FoundTag('FileModifyDate', $mTime) if defined $mTime;
+            $self->FoundTag('FileAccessDate', $aTime) if defined $aTime;
+            my $cTag = $^O eq 'MSWin32' ? 'FileCreateDate' : 'FileInodeChangeDate';
+            $self->FoundTag($cTag, $cTime) if defined $cTime;
+            $self->FoundTag('FilePermissions', $stat[2]) if defined $stat[2];
         } else {
-            # (note that Windows directories will still show the
-            #  daylight savings time bug -- should fix this sometime)
             @stat = stat $$raf{FILE_PT};
         }
-        my $fileSize = $stat[7];
-        $self->FoundTag('FileSize', $stat[7]) if defined $stat[7];
-        $self->FoundTag('ResourceForkSize', $rsize) if $rsize;
-        $self->FoundTag('FileModifyDate', $stat[9]) if defined $stat[9];
-        $self->FoundTag('FileAccessDate', $stat[8]) if defined $stat[8];
-        my $cTag = $^O eq 'MSWin32' ? 'FileCreateDate' : 'FileInodeChangeDate';
-        $self->FoundTag($cTag, $stat[10]) if defined $stat[10];
-        $self->FoundTag('FilePermissions', $stat[2]) if defined $stat[2];
         # extract more system info if SystemTags option is set
         if (@stat) {
             my $sys = $$options{SystemTags} || ($reqAll and not defined $$options{SystemTags});
@@ -2527,18 +2486,11 @@ sub ExtractInfo($;@)
             if ($crDate or $mdItem or $xattr) {
                 require Image::ExifTool::MacOS;
                 Image::ExifTool::MacOS::GetFileCreateDate($self, $filename) if $crDate;
-                Image::ExifTool::MacOS::ExtractMDItemTags($self, $filename) if $mdItem and $plainFile;
+                Image::ExifTool::MacOS::ExtractMDItemTags($self, $filename) if $mdItem;
                 Image::ExifTool::MacOS::ExtractXAttrTags($self, $filename) if $xattr;
             }
         }
-        # do whatever else we can with directories, then return
-        if ($isDir or (defined $stat[2] and ($stat[2] & 0170000) == 0040000)) {
-            $self->FoundTag('FileType', 'DIR');
-            $self->FoundTag('FileTypeExtension', '');
-            $self->BuildCompositeTags() if $$options{Composite};
-            $raf->Close() if $raf;
-            return 1;
-        }
+
         # get list of file types to check
         my ($tiffType, %noMagic, $recognizedExt);
         my $ext = $$self{FILE_EXT} = GetFileExtension($realname);
@@ -4127,14 +4079,7 @@ sub GetFileTime($$)
     # open file by name if necessary
     unless (ref $file) {
         local *FH;
-        unless ($self->Open(\*FH, $file)) {
-            if ($self->IsDirectory($file)) {
-                my @rtn = (stat $file)[8, 9, 10];
-                return @rtn if defined $rtn[0];
-            }
-            $self->Warn("GetFileTime error for '${file}'");
-            return ();
-        }
+        $self->Open(\*FH, $file) or $self->Warn("GetFileTime error for '${file}'"), return ();
         $file = *FH;  # (not \*FH, so *FH will be kept open until $file goes out of scope)
     }
     # on Windows, try to work around incorrect file times when daylight saving time is in effect
@@ -5765,11 +5710,7 @@ sub GetUnixTime($;$)
     my ($timeStr, $isLocal) = @_;
     return 0 if $timeStr eq '0000:00:00 00:00:00';
     my @tm = ($timeStr =~ /^(\d+):(\d+):(\d+)\s+(\d+):(\d+):(\d+)(.*)/);
-    return undef unless @tm == 7;
-    unless (eval { require Time::Local }) {
-        warn "Time::Local is not installed\n";
-        return undef;
-    }
+    return undef unless @tm == 7 and eval { require Time::Local };
     my ($tzStr, $tzSec) = (pop(@tm), 0);
     # use specified timezone offset (if given) instead of local system time
     # if we are converting a local time value
@@ -5967,7 +5908,7 @@ sub ProcessTrailers($$)
     for (;;) { # loop through all trailers
         my ($proc, $outBuff);
         if ($dirName eq 'Insta360') {
-            require 'Image/ExifTool/QuickTimeStream.pl';
+            require "Image/ExifTool/QuickTimeStream.pl";
             $proc = 'Image::ExifTool::QuickTime::ProcessInsta360';
         } else {
             require "Image/ExifTool/$dirName.pm";
@@ -6129,10 +6070,9 @@ sub ProcessJPEG($$)
     my $out = $$options{TextOut};
     my $fast = $$options{FastScan} || 0;
     my $raf = $$dirInfo{RAF};
-    my $req = $$self{REQ_TAG_LOOKUP};
     my $htmlDump = $$self{HTML_DUMP};
     my %dumpParms = ( Out => $out );
-    my ($success, $wantTrailer, $trailInfo, $foundSOS, %jumbfChunk);
+    my ($success, $wantTrailer, $trailInfo, $foundSOS);
     my (@iccChunk, $iccChunkCount, $iccChunksTotal, @flirChunk, $flirCount, $flirTotal);
     my ($preview, $scalado, @dqt, $subSampling, $dumpEnd, %extendedXMP);
 
@@ -6143,7 +6083,7 @@ sub ProcessJPEG($$)
         $$self{FILE_TYPE} = 'EXV';
     }
     my $appBytes = 0;
-    my $calcImageLen = $$req{jpegimagelength};
+    my $calcImageLen = $$self{REQ_TAG_LOOKUP}{jpegimagelength};
     if ($$options{RequestAll} and $$options{RequestAll} > 2) {
         $calcImageLen = 1;
     }
@@ -6277,7 +6217,7 @@ sub ProcessJPEG($$)
             } else {
                 $self->Warn('Missing JPEG SOS');
             }
-            if ($$req{trailer}) {
+            if ($$self{REQ_TAG_LOOKUP}{trailer}) {
                 # read entire trailer into memory
                 if ($raf->Seek(0,2)) {
                     my $len = $raf->Tell() - $pos;
@@ -6411,7 +6351,7 @@ sub ProcessJPEG($$)
                 next if $trailInfo or $wantTrailer or $verbose > 2 or $htmlDump;
             }
             # must scan to EOI if Validate or JpegCompressionFactor used
-            next if $$options{Validate} or $calcImageLen or $$req{trailer};
+            next if $$options{Validate} or $calcImageLen or $$self{REQ_TAG_LOOKUP}{trailer};
             # nothing interesting to parse after start of scan (SOS)
             $success = 1;
             last;   # all done parsing file
@@ -6431,7 +6371,7 @@ sub ProcessJPEG($$)
             #  must use the RequestTags option to generate these tags if they have not been
             #  specifically requested.  The reason is that there is too much overhead involved
             #  in the calculation of this tag to make this worth the CPU time.)
-            ($$req{jpegdigest} or $$req{jpegqualityestimate}
+            ($$self{REQ_TAG_LOOKUP}{jpegdigest} or $$self{REQ_TAG_LOOKUP}{jpegqualityestimate}
             or ($$options{RequestAll} and $$options{RequestAll} > 2)))
         {
             my $num = unpack('C',$$segDataPt) & 0x0f;   # get table index
@@ -6549,7 +6489,7 @@ sub ProcessJPEG($$)
                 }
                 if ($start and $plen and IsInt($start) and IsInt($plen) and
                     $start + $plen > $$self{EXIF_POS} + length($$self{EXIF_DATA}) and
-                    ($$req{previewimage} or
+                    ($$self{REQ_TAG_LOOKUP}{previewimage} or
                     # (extracted normally, so check Binary option)
                     ($$options{Binary} and not $$self{EXCL_TAG_LOOKUP}{previewimage})))
                 {
@@ -6944,7 +6884,7 @@ sub ProcessJPEG($$)
                 # (with number of elements N = ImageHeight / 16 - 1, ref PH/NealKrawetz)
                 $xtra = 'segment (N=' . unpack('x6N', $$segDataPt) . ')';
             }
-        } elsif ($marker == 0xeb) {         # APP11 (JPEG-HDR, JUMBF)
+        } elsif ($marker == 0xeb) {         # APP11 (JPEG-HDR)
             if ($$segDataPt =~ /^HDR_RI /) {
                 $dumpType = 'JPEG-HDR';
                 my $dataPt = $segDataPt;
@@ -6963,47 +6903,6 @@ sub ProcessJPEG($$)
                     my %dirInfo = ( DataPt => $dataPt );
                     $self->ProcessDirectory(\%dirInfo, $tagTablePtr);
                     undef $combinedSegData;
-                }
-            } elsif ($$segDataPt =~ /^(JP..)/s and length($$segDataPt) >= 16) {
-                # JUMBF extension marker
-                my $hdr = $1;
-                $dumpType = 'JUMBF';
-                SetByteOrder('MM');
-                my $seq = Get32u($segDataPt, 4) - 1; # (start from 0)
-                my $len = Get32u($segDataPt, 8);
-                my $type = substr($$segDataPt, 12, 4);
-                my $hdrLen;
-                if ($len == 1 and length($$segDataPt) >= 24) {
-                    $len = Get64u($$segDataPt, 16);
-                    $hdrLen = 16;
-                } else {
-                    $hdrLen = 8;
-                }
-                $jumbfChunk{$type} or $jumbfChunk{$type} = [ ];
-                if ($len < $hdrLen) {
-                    $self->Warn('Invalid JUMBF segment');
-                } elsif ($seq < 0) {
-                    $self->Warn('Invalid JUMBF sequence number');
-                } elsif (defined $jumbfChunk{$type}[$seq]) {
-                    $self->Warn('Duplicate JUMBF sequence number');
-                } else {
-                    # add to list of JUMBF chunks
-                    $jumbfChunk{$type}[$seq] = substr($$segDataPt, 8 + $hdrLen);
-                    # check to see if we have a complete JUMBF box
-                    my $size = $hdrLen;
-                    foreach (@{$jumbfChunk{$type}}) {
-                        defined $_ or $size = 0, last;
-                        $size += length $_;
-                    }
-                    if ($size == $len) {
-                        my $buff = join '', substr($$segDataPt,8,$hdrLen), @{$jumbfChunk{$type}};
-                        $dirInfo{DataPt} = \$buff;
-                        $dirInfo{DataPos} = $segPos + 8; # (shows correct offsets for single-segment JUMBF)
-                        $dirInfo{DataLen} = $dirInfo{DirLen} = $size;
-                        my $tagTablePtr = GetTagTable('Image::ExifTool::Jpeg2000::Main');
-                        $self->ProcessDirectory(\%dirInfo, $tagTablePtr);
-                        delete $jumbfChunk{$type};
-                    }
                 }
             }
         } elsif ($marker == 0xec) {         # APP12 (Ducky, Picture Info)
@@ -7056,7 +6955,7 @@ sub ProcessJPEG($$)
         } elsif ($marker == 0xee) {         # APP14 (Adobe)
             if ($$segDataPt =~ /^Adobe/) {
                 # extract as a block if requested, or if copying tags from file
-                if ($$req{adobe} or
+                if ($$self{REQ_TAG_LOOKUP}{adobe} or
                     # (not extracted normally, so check TAGS_FROM_FILE)
                     ($$self{TAGS_FROM_FILE} and not $$self{EXCL_TAG_LOOKUP}{adobe}))
                 {
@@ -7159,7 +7058,6 @@ sub ProcessJPEG($$)
         Image::ExifTool::JPEGDigest::Calculate($self, \@dqt, $subSampling);
     }
     # issue necessary warnings
-    $self->Warn('Invalid JUMBF size or missing JUMBF chunk') if %jumbfChunk;
     $self->Warn('Incomplete ICC_Profile record', 1) if defined $iccChunkCount;
     $self->Warn('Incomplete FLIR record', 1) if defined $flirCount;
     $self->Warn('Error reading PreviewImage', 1) if $$self{PreviewError};

@@ -1,7 +1,7 @@
 # node-exiftool.pl
 Fork of [https://github.com/Sobesednik/node-exiftool.pl](https://github.com/Sobesednik/node-exiftool.pl)
 
-A distribution of _exiftool_ perl executable with lib. Current version is 12.23.
+A distribution of _exiftool_ perl executable with lib. Current version is 12.16.
 
 [![npm version](https://badge.fury.io/js/%40mcmics%2Fexiftool.pl.svg)](https://badge.fury.io/js/%40mcmics%2Fexiftool.pl)
 [![Build Status](https://api.travis-ci.com/MCMicS/node-exiftool.pl.svg?branch=master)](https://travis-ci.com/github/MCMicS/node-exiftool.pl)

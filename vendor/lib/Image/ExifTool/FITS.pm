@@ -14,7 +14,7 @@ use strict;
 use vars qw($VERSION);
 use Image::ExifTool qw(:DataAccess :Utils);
 
-$VERSION = '1.02';
+$VERSION = '1.00';
 
 # FITS tags (ref 1)
 %Image::ExifTool::FITS::Main = (
@@ -36,10 +36,6 @@ $VERSION = '1.02';
    'TIME-OBS'=> { Name => 'ObservationTime',    Groups => { 2 => 'Time' } },
    'DATE-END'=> { Name => 'ObservationDateEnd', Groups => { 2 => 'Time' } },
    'TIME-END'=> { Name => 'ObservationTimeEnd', Groups => { 2 => 'Time' } },
-    COMMENT  => { Name => 'Comment', PrintConv => '$val =~ s/^ +//; $val',
-                  Notes => 'leading spaces are removed if L<PrintConv|../ExifTool.html#PrintConv> is enabled' },
-    HISTORY  => { Name => 'History', PrintConv => '$val =~ s/^ +//; $val',
-                  Notes => 'leading spaces are removed if L<PrintConv|../ExifTool.html#PrintConv> is enabled' },
 );
 
 #------------------------------------------------------------------------------
@@ -71,14 +67,7 @@ sub ProcessFITS($$)
             last if $key eq 'END';
             # make sure the key is valid
             $key =~ /^[-_A-Z0-9]*$/ or $et->Warn('Format error in FITS header'), last;
-            if ($key eq 'COMMENT' or $key eq 'HISTORY') {
-                my $val = substr($buff, 8); # comments start in column 9
-                $val =~ s/ +$//;            # remove trailing spaces
-                $et->HandleTag($tagTablePtr, $key, $val);
-                next;
-            }
-            # ignore other lines that aren't tags
-            next unless substr($buff,8,2) eq '= ';
+            next unless substr($buff,8,2) eq '= ';  # ignore comment lines
             # save tag name (avoiding potential conflict with ExifTool variables)
             $tag = $Image::ExifTool::specialTags{$key} ? "_$key" : $key;
             # add to tag table if necessary

@@ -47,7 +47,7 @@ use Image::ExifTool qw(:DataAccess :Utils);
 use Image::ExifTool::Exif;
 use Image::ExifTool::GPS;
 
-$VERSION = '2.62';
+$VERSION = '2.57';
 
 sub ProcessMOV($$;$);
 sub ProcessKeys($$$);
@@ -65,7 +65,6 @@ sub Process_gsen($$$);
 sub ProcessRIFFTrailer($$$);
 sub ProcessTTAD($$$);
 sub ProcessNMEA($$$);
-sub ProcessGPSLog($$$);
 sub SaveMetaKeys($$$);
 # ++^^^^^^^^^^^^++
 sub ParseItemLocation($$);
@@ -161,15 +160,8 @@ my %ftypLookup = (
     'F4P ' => 'Protected Video for Adobe Flash Player 9+ (.F4P)', # video/mp4
     'F4V ' => 'Video for Adobe Flash Player 9+ (.F4V)', # video/mp4
     'isc2' => 'ISMACryp 2.0 Encrypted File', # ?/enc-isoff-generic
-    'iso2' => 'MP4 Base Media v2 [ISO 14496-12:2005]', # video/mp4 (or audio)
-    'iso3' => 'MP4 Base Media v3', # video/mp4 (or audio)
-    'iso4' => 'MP4 Base Media v4', # video/mp4 (or audio)
-    'iso5' => 'MP4 Base Media v5', # video/mp4 (or audio)
-    'iso6' => 'MP4 Base Media v6', # video/mp4 (or audio)
-    'iso7' => 'MP4 Base Media v7', # video/mp4 (or audio)
-    'iso8' => 'MP4 Base Media v8', # video/mp4 (or audio)
-    'iso9' => 'MP4 Base Media v9', # video/mp4 (or audio)
-    'isom' => 'MP4 Base Media v1 [IS0 14496-12:2003]', # video/mp4 (or audio)
+    'iso2' => 'MP4 Base Media v2 [ISO 14496-12:2005]', # video/mp4
+    'isom' => 'MP4  Base Media v1 [IS0 14496-12:2003]', # video/mp4
     'JP2 ' => 'JPEG 2000 Image (.JP2) [ISO 15444-1 ?]', # image/jp2
     'JP20' => 'Unknown, from GPAC samples (prob non-existent)',
     'jpm ' => 'JPEG 2000 Compound Image (.JPM) [ISO 15444-6]', # image/jpm
@@ -251,11 +243,7 @@ my %timeInfo = (
     },
     # (all CR3 files store UTC times - PH)
     ValueConv => 'ConvertUnixTime($val, $self->Options("QuickTimeUTC") || $$self{FileType} eq "CR3")',
-    ValueConvInv => q{
-        $val = GetUnixTime($val, $self->Options("QuickTimeUTC"));
-        return undef unless defined $val;
-        return $val + (66 * 365 + 17) * 24 * 3600;
-    },
+    ValueConvInv => 'GetUnixTime($val, $self->Options("QuickTimeUTC")) + (66 * 365 + 17) * 24 * 3600',
     PrintConv => '$self->ConvertDateTime($val)',
     PrintConvInv => '$self->InverseDateTime($val)',
     # (can't put Groups here because they aren't constant!)
@@ -270,15 +258,11 @@ my %unknownInfo = (
     Unknown => 1,
     ValueConv => '$val =~ /^([\x20-\x7e]*)\0*$/ ? $1 : \$val',
 );
-
-# multi-language text with 6-byte header
-my %langText = ( IText => 6 );
-
 # parsing for most of the 3gp udta language text boxes
-my %langText3gp = (
+my %langText = (
     Notes => 'used in 3gp videos',
-    Avoid => 1,
     IText => 6,
+    Avoid => 1,
 );
 
 # 4-character Vendor ID codes (ref PH)
@@ -686,15 +670,6 @@ my %eeBox2 = (
     udat => { #PH (GPS NMEA-format log written by Datakam Player software)
         Name => 'GPSLog',
         Binary => 1,    # (actually ASCII, but very lengthy)
-        Notes => 'parsed to extract GPS separately when ExtractEmbedded is used',
-        RawConv => q{
-            $val =~ s/\0+$//;   # remove trailing nulls
-            if (length $val and $$self{OPTIONS}{ExtractEmbedded}) {
-                my $tagTbl = GetTagTable('Image::ExifTool::QuickTime::Stream');
-                Image::ExifTool::QuickTime::ProcessGPSLog($self, { DataPt => \$val }, $tagTbl);
-            }
-            return $val;
-        },
     },
     # meta - proprietary XML information written by some Flip cameras - PH
     # beam - 16 bytes found in an iPhone video
@@ -1570,15 +1545,15 @@ my %eeBox2 = (
     # the following are 3gp tags, references:
     # http://atomicparsley.sourceforge.net
     # http://www.3gpp.org/ftp/tsg_sa/WG4_CODEC/TSGS4_25/Docs/
-    # (note that all %langText3gp tags are Avoid => 1)
-    cprt => { Name => 'Copyright',  %langText3gp, Groups => { 2 => 'Author' } },
-    auth => { Name => 'Author',     %langText3gp, Groups => { 2 => 'Author' } },
-    titl => { Name => 'Title',      %langText3gp },
-    dscp => { Name => 'Description',%langText3gp },
-    perf => { Name => 'Performer',  %langText3gp },
-    gnre => { Name => 'Genre',      %langText3gp },
-    albm => { Name => 'Album',      %langText3gp },
-    coll => { Name => 'CollectionName', %langText3gp }, #17
+    # (note that all %langText tags are Avoid => 1)
+    cprt => { Name => 'Copyright',  %langText, Groups => { 2 => 'Author' } },
+    auth => { Name => 'Author',     %langText, Groups => { 2 => 'Author' } },
+    titl => { Name => 'Title',      %langText },
+    dscp => { Name => 'Description',%langText },
+    perf => { Name => 'Performer',  %langText },
+    gnre => { Name => 'Genre',      %langText },
+    albm => { Name => 'Album',      %langText },
+    coll => { Name => 'CollectionName', %langText }, #17
     rtng => {
         Name => 'Rating',
         # (4-byte flags, 4-char entity, 4-char criteria, 2-byte lang, string)
@@ -1609,11 +1584,8 @@ my %eeBox2 = (
     },
     kywd => {
         Name => 'Keywords',
-        # (4 byte flags, 2-byte lang, 1-byte count, count x pascal strings, ref 17)
-        # (but I have also seen a simple string written by iPhone)
+        # (4 byte flags, 2-byte lang, 1-byte count, count x pascal strings)
         RawConv => q{
-            my $sep = $self->Options('ListSep');
-            return join($sep, split /\0+/, $val) unless $val =~ /^\0/; # (iPhone)
             return '<err>' unless length $val >= 7;
             my $lang = Image::ExifTool::QuickTime::UnpackLang(Get16u(\$val, 4));
             $lang = $lang ? "($lang) " : '';
@@ -1629,6 +1601,7 @@ my %eeBox2 = (
                 push @vals, $v;
                 $pos += $len;
             }
+            my $sep = $self->Options('ListSep');
             return $lang . join($sep, @vals);
         },
     },
@@ -2015,11 +1988,7 @@ my %eeBox2 = (
     # ---- Microsoft ----
     Xtra => { #PH (microsoft)
         Name => 'MicrosoftXtra',
-        WriteGroup => 'Microsoft',
-        SubDirectory => {
-            DirName => 'Microsoft',
-            TagTable => 'Image::ExifTool::Microsoft::Xtra',
-        },
+        SubDirectory => { TagTable => 'Image::ExifTool::Microsoft::Xtra' },
     },
     # ---- Minolta ----
     MMA0 => { #PH (DiMage 7Hi)
@@ -2068,7 +2037,7 @@ my %eeBox2 = (
             SubDirectory => { TagTable => 'Image::ExifTool::Olympus::thmb' },
         },{ #17 (format is in bytes 3-7)
             Name => 'ThumbnailImage',
-            Condition => '$$valPt =~ /^.{8}\xff\xd8\xff[\xdb\xe0]/s',
+            Condition => '$$valPt =~ /^.{8}\xff\xd8\xff\xdb/s',
             Groups => { 2 => 'Preview' },
             RawConv => 'substr($val, 8)',
             Binary => 1,
@@ -3025,9 +2994,9 @@ my %eeBox2 = (
         3-character ISO 639-2 language code and an optional ISO 3166-1 alpha 2
         country code to the tag name (eg. "ItemList:Title-fra" or
         "ItemList::Title-fra-FR").  When creating a new Meta box to contain the
-        ItemList directory, by default ExifTool adds an 'mdir' (Metadata) Handler
-        box because Apple software may ignore ItemList tags otherwise, but the API
-        L<QuickTimeHandler|../ExifTool.html#QuickTimeHandler> option may be set to 0 to avoid this.
+        ItemList directory, by default ExifTool does not specify a
+        L<Handler|Image::ExifTool::TagNames/QuickTime Handler Tags>, but the
+        API L<QuickTimeHandler|../ExifTool.html#QuickTimeHandler> option may be used to include an 'mdir' Handler box.
     },
     # in this table, binary 1 and 2-byte "data"-type tags are interpreted as
     # int8u and int16u.  Multi-byte binary "data" tags are extracted as binary data.
@@ -6188,12 +6157,13 @@ my %eeBox2 = (
     PROCESS_PROC => \&ProcessKeys,
     WRITE_PROC => \&WriteKeys,
     CHECK_PROC => \&CheckQTValue,
-    VARS => { LONG_TAGS => 7 },
+    VARS => { LONG_TAGS => 3 },
     WRITABLE => 1,
     # (not PREFERRED when writing)
     GROUPS => { 1 => 'Keys' },
     WRITE_GROUP => 'Keys',
     LANG_INFO => \&GetLangInfo,
+    FORMAT => 'string',
     NOTES => q{
         This directory contains a list of key names which are used to decode tags
         written by the "mdta" handler.  Also in this table are a few tags found in
@@ -6295,11 +6265,6 @@ my %eeBox2 = (
         PrintConv => '$self->ConvertDateTime($val)',
         PrintConvInv => '$self->InverseDateTime($val,1)', # (add time zone if it didn't exist)
     },
-    'location.accuracy.horizontal' => { Name => 'LocationAccuracyHorizontal' },
-    'live-photo.auto'           => { Name => 'LivePhotoAuto', Writable => 'int8u' },
-    'live-photo.vitality-score' => { Name => 'LivePhotoVitalityScore', Writable => 'float' },
-    'live-photo.vitality-scoring-version' => { Name => 'LivePhotoVitalityScoringVersion', Writable => 'int64s' },
-    'apple.photos.variation-identifier'   => { Name => 'ApplePhotosVariationIdentifier',  Writable => 'int64s' },
     'direction.facing' => { Name => 'CameraDirection', Groups => { 2 => 'Location' } },
     'direction.motion' => { Name => 'CameraMotion',    Groups => { 2 => 'Location' } },
     'location.body'    => { Name => 'LocationBody',    Groups => { 2 => 'Location' } },
@@ -6335,15 +6300,11 @@ my %eeBox2 = (
     # com.divergentmedia.clipwrap.manufacturer     ('Sony')
     # com.divergentmedia.clipwrap.originalDateTime ('2013/2/6 10:30:40+0200')
 #
-# seen in timed metadata (mebx), and added dynamically to the table via SaveMetaKeys()
-# NOTE: these tags are not writable! (timed metadata cannot yet be written)
+# seen in timed metadata (mebx), and added dynamically to the table
+# via SaveMetaKeys().  NOTE: these tags are not writable!
 #
     # (mdta)com.apple.quicktime.video-orientation (dtyp=66, int16s)
-    'video-orientation' => {
-        Name => 'VideoOrientation',
-        Writable => 0,
-        PrintConv => \%Image::ExifTool::Exif::orientation, #PH (NC)
-    },
+    'video-orientation' => { Name => 'VideoOrientation', Writable => 0 },
     # (mdta)com.apple.quicktime.live-photo-info (dtyp=com.apple.quicktime.com.apple.quicktime.live-photo-info)
     'live-photo-info' => {
         Name => 'LivePhotoInfo',
@@ -7628,11 +7589,7 @@ my %eeBox2 = (
     8 => {
         Name => 'HandlerType',
         Format => 'undef[4]',
-        RawConv => q{
-            $$self{HandlerType} = $val unless $val eq 'alis' or $val eq 'url ';
-            $$self{HasHandler}{$val} = 1; # remember all our handlers
-            return $val;
-        },
+        RawConv => '$$self{HandlerType} = $val unless $val eq "alis" or $val eq "url "; $val',
         PrintConvColumns => 2,
         PrintConv => {
             alis => 'Alias Data', #PH
@@ -7737,7 +7694,7 @@ my %eeBox2 = (
             $val =~ s/\0+$//;   # remove trailing nulls
             if (length $val and $$self{OPTIONS}{ExtractEmbedded}) {
                 my $tagTbl = GetTagTable('Image::ExifTool::QuickTime::Stream');
-                Image::ExifTool::QuickTime::ProcessGPSLog($self, { DataPt => \$val }, $tagTbl);
+                Image::ExifTool::QuickTime::ProcessNMEA($self, { DataPt => \$val }, $tagTbl);
             }
             return $val;
         },
@@ -8617,7 +8574,7 @@ sub QuickTimeFormat($$)
     my ($flags, $len) = @_;
     my $format;
     if ($flags == 0x15 or $flags == 0x16) {
-        $format = { 1=>'int8', 2=>'int16', 4=>'int32', 8=>'int64' }->{$len};
+        $format = { 1=>'int8', 2=>'int16', 4=>'int32' }->{$len};
         $format .= $flags == 0x15 ? 's' : 'u' if $format;
     } elsif ($flags == 0x17) {
         $format = 'float';
@@ -8970,7 +8927,6 @@ sub ProcessMOV($$;$)
             if ($raf->Read($buff, $size-8) == $size-8) {
                 $raf->Seek(-($size-8), 1);
                 my $type = substr($buff, 0, 4);
-                $$et{save_ftyp} = $type;
                 # see if we know the extension for this file type
                 if ($ftypLookup{$type} and $ftypLookup{$type} =~ /\(\.(\w+)/) {
                     $fileType = $1;
@@ -9490,13 +9446,6 @@ ItemID:         foreach $id (keys %$items) {
         $raf->Read($buff, 8) == 8 or last;
         ($size, $tag) = unpack('Na4', $buff);
         ++$index if defined $index;
-    }
-    # tweak file type based on track content ("iso*" ftyp only)
-    if ($$et{VALUE}{FileType} and $$et{VALUE}{FileType} eq 'MP4' and
-        $$et{save_ftyp} and $$et{HasHandler} and $$et{save_ftyp} =~ /^iso/ and
-        $$et{HasHandler}{soun} and not $$et{HasHandler}{vide})
-    {
-        $et->OverrideFileType('M4A', 'audio/mp4');
     }
     # fill in missing defaults for alternate language tags
     # (the first language is taken as the default)
