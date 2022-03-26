@@ -1,4 +1,8 @@
 language: node_js
+arch:
+  - arm64
+  - ppc64le
+  - s390x
 node_js:
   - "lts/*"
 dist: xenial
