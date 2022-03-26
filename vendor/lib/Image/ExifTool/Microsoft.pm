@@ -17,7 +17,7 @@ use vars qw($VERSION);
 use Image::ExifTool qw(:DataAccess :Utils);
 use Image::ExifTool::XMP;
 
-$VERSION = '1.22';
+$VERSION = '1.23';
 
 sub ProcessXtra($$$);
 sub WriteXtra($$$);
@@ -989,11 +989,11 @@ sub WriteXtra($$$)
             last;   # (it was a cheap goto)
         }
         if ($done{$tag}) {
+            $changed = 1;
             # write changed values
             my $buff = WriteXtraValue($et, $$newTags{$tag}, \@newVals);
             if (length $buff) {
                 $newData .= Set32u(8+length($tag)+length($buff)) . Set32u(length($tag)) . $tag . $buff;
-                $changed = 1;
             }
         } else {
             # nothing changed; just copy over
@@ -1100,7 +1100,7 @@ Xtra tags in videos.
 
 =head1 AUTHOR
 
-Copyright 2003-2021, Phil Harvey (philharvey66 at gmail.com)
+Copyright 2003-2022, Phil Harvey (philharvey66 at gmail.com)
 
 This library is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
