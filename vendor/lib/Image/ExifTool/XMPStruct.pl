@@ -32,9 +32,7 @@ sub SerializeStruct($;$)
     my ($key, $val, @vals, $rtnVal);
 
     if (ref $obj eq 'HASH') {
-        # support hashes with ordered keys
-        my @keys = $$obj{_ordered_keys_} ? @{$$obj{_ordered_keys_}} : sort keys %$obj;
-        foreach $key (@keys) {
+        foreach $key (sort keys %$obj) {
             push @vals, $key . '=' . SerializeStruct($$obj{$key}, '}');
         }
         $rtnVal = '{' . join(',', @vals) . '}';
@@ -634,14 +632,15 @@ sub RestoreStruct($;$)
     local $_;
     my ($et, $keepFlat) = @_;
     my ($key, %structs, %var, %lists, $si, %listKeys, @siList);
+    my $ex = $$et{TAG_EXTRA};
     my $valueHash = $$et{VALUE};
     my $fileOrder = $$et{FILE_ORDER};
     my $tagExtra = $$et{TAG_EXTRA};
     foreach $key (keys %{$$et{TAG_INFO}}) {
-        $$tagExtra{$key} or next;
-        my $structProps = $$tagExtra{$key}{Struct} or next;
-        delete $$tagExtra{$key}{Struct};    # (don't re-use)
-        my $tagInfo = $$et{TAG_INFO}{$key}; # tagInfo for flattened tag
+        $$ex{$key} or next;
+        my $structProps = $$ex{$key}{Struct} or next;
+        delete $$ex{$key}{Struct}; # (don't re-use)
+        my $tagInfo = $$et{TAG_INFO}{$key};   # tagInfo for flattened tag
         my $table = $$tagInfo{Table};
         my $prop = shift @$structProps;
         my $tag = $$prop[0];
@@ -828,23 +827,8 @@ sub RestoreStruct($;$)
     $var{$_} and push @siList, $_ foreach keys %structs;
     # save new structures in the same order they were read from file
     foreach $si (sort { $var{$a}[1] <=> $var{$b}[1] } @siList) {
-        # test to see if a tag for this structure has already been generated
-        # (this could happen only if one of the structures in a list was empty)
-        $key = $var{$si}[0]{Name};
-        my $found;
-        if ($$valueHash{$key}) {
-            my @keys = grep /^$key( \(\d+\))?$/, keys %$valueHash;
-            foreach $key (@keys) {
-                next unless $$valueHash{$key} eq $structs{$si};
-                $found = 1;
-                last;
-            }
-        }
-        unless ($found) {
-            # otherwise, generate a new tag for this structure
-            $key = $et->FoundTag($var{$si}[0], '');
-            $$valueHash{$key} = $structs{$si};
-        }
+        $key = $et->FoundTag($var{$si}[0], '');
+        $$valueHash{$key} = $structs{$si};
         $$fileOrder{$key} = $var{$si}[1];
     }
 }
@@ -869,7 +853,7 @@ information.
 
 =head1 AUTHOR
 
-Copyright 2003-2022, Phil Harvey (philharvey66 at gmail.com)
+Copyright 2003-2021, Phil Harvey (philharvey66 at gmail.com)
 
 This library is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.

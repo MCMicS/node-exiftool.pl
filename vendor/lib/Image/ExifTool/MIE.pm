@@ -393,7 +393,7 @@ my %offOn = ( 0 => 'Off', 1 => 'On' );
         ValueConv    => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
         ValueConvInv => 'Image::ExifTool::GPS::ToDMS($self, $val, 0)',
         PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "N")',
-        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lat")',
     },
     Longitude => {
         Name => 'GPSLongitude',
@@ -406,7 +406,7 @@ my %offOn = ( 0 => 'Off', 1 => 'On' );
         ValueConv    => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
         ValueConvInv => 'Image::ExifTool::GPS::ToDMS($self, $val, 0)',
         PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "E")',
-        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lon")',
     },
     MeasureMode => {
         Name => 'GPSMeasureMode',
@@ -2545,7 +2545,7 @@ tag name.  For example:
 
 =head1 AUTHOR
 
-Copyright 2003-2022, Phil Harvey (philharvey66 at gmail.com)
+Copyright 2003-2021, Phil Harvey (philharvey66 at gmail.com)
 
 This library is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.  The MIE format itself is also

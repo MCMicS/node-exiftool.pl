@@ -17,6 +17,7 @@ my %movMap = (
     Keys      => 'Movie',       # MOV-Movie-Meta-Keys !! (hack due to different Meta location)
     Meta      => 'UserData',
     XMP       => 'UserData',    # MOV-Movie-UserData-XMP
+    Microsoft => 'UserData',    # MOV-Movie-UserData-Microsoft
     UserData  => 'Movie',       # MOV-Movie-UserData
     Movie     => 'MOV',
     GSpherical => 'SphericalVideoXML', # MOV-Movie-Track-SphericalVideoXML
@@ -30,6 +31,7 @@ my %mp4Map = (
     Keys      => 'Movie',       # MOV-Movie-Meta-Keys !! (hack due to different Meta location)
     Meta      => 'UserData',
     UserData  => 'Movie',       # MOV-Movie-UserData
+    Microsoft => 'UserData',    # MOV-Movie-UserData-Microsoft
     Movie     => 'MOV',
     XMP       => 'MOV',         # MOV-XMP
     GSpherical => 'SphericalVideoXML', # MOV-Movie-Track-SphericalVideoXML
@@ -76,8 +78,8 @@ my %dirMap = (
 # convert ExifTool Format to QuickTime type
 my %qtFormat = (
    'undef' => 0x00,  string => 0x01,
-    int8s  => 0x15,  int16s => 0x15,  int32s => 0x15,
-    int8u  => 0x16,  int16u => 0x16,  int32u => 0x16,
+    int8s  => 0x15,  int16s => 0x15,  int32s => 0x15,  int64s => 0x15,
+    int8u  => 0x16,  int16u => 0x16,  int32u => 0x16,  int64u => 0x16,
     float  => 0x17,  double => 0x18,
 );
 my $undLang = 0x55c4;   # numeric code for default ('und') language
@@ -297,7 +299,7 @@ sub GetLangInfo($$)
 sub CheckQTValue($$$)
 {
     my ($et, $tagInfo, $valPtr) = @_;
-    my $format = $$tagInfo{Format} || $$tagInfo{Table}{FORMAT};
+    my $format = $$tagInfo{Format} || $$tagInfo{Writable} || $$tagInfo{Table}{FORMAT};
     return undef unless $format;
     return Image::ExifTool::CheckValue($valPtr, $format, $$tagInfo{Count});
 }
@@ -310,8 +312,8 @@ sub FormatQTValue($$;$$)
 {
     my ($et, $valPt, $format, $writable) = @_;
     my $flags;
-    if ($format and $format ne 'string') {
-        $$valPt = WriteValue($$valPt, $format);
+    if ($format and $format ne 'string' or not $format and $writable and $writable ne 'string') {
+        $$valPt = WriteValue($$valPt, $format || $writable);
         if ($writable and $qtFormat{$writable}) {
             $flags = $qtFormat{$writable};
         } else {
@@ -1065,9 +1067,6 @@ sub WriteQuickTime($$$)
                     #  3=optional base offset, 4=optional item ID)
                     ChunkOffset => \@chunkOffset,
                 );
-                # set InPlace flag so XMP will be padded properly when
-                # QuickTimePad is used if this is an XMP directory
-                $subdirInfo{InPlace} = 2 if $et->Options('QuickTimePad');
                 # pass the header pointer if necessary (for EXIF IFD's
                 # where the Base offset is at the end of the header)
                 if ($hdrLen and $hdrLen < $size) {
@@ -1332,14 +1331,6 @@ sub WriteQuickTime($$$)
             }
             # write the new atom if it was modified
             if (defined $newData) {
-                my $sizeDiff = length($buff) - length($newData);
-                # pad to original size if specified, otherwise give verbose message about the changed size
-                if ($sizeDiff > 0 and $$tagInfo{PreservePadding} and $et->Options('QuickTimePad')) {
-                    $newData .= "\0" x $sizeDiff;
-                    $et->VPrint(1, "    ($$tagInfo{Name} padded to original size)");
-                } elsif ($sizeDiff) {
-                    $et->VPrint(1, "    ($$tagInfo{Name} changed size)");
-                }
                 my $len = length($newData) + 8;
                 $len > 0x7fffffff and $et->Error("$$tagInfo{Name} to large to write"), last;
                 # update size in ChunkOffset list for modified 'uuid' atom
@@ -1389,13 +1380,9 @@ sub WriteQuickTime($$$)
                 $pos += $siz;
             }
             if ($msg) {
-                # (allow empty sample description for 'url ' handler type)
-                if ($$et{HandlerType} or length($buff) > 8) {
-                    my $grp = $$et{CUR_WRITE_GROUP} || $parent;
-                    $et->Error("$msg for $grp");
-                    return $rtnErr;
-                }
-                $flg = 1; # (this seems to be the case)
+                my $grp = $$et{CUR_WRITE_GROUP} || $parent;
+                $et->Error("$msg for $grp");
+                return $rtnErr;
             }
             $$et{QtDataFlg} = $flg;
         }
@@ -1925,7 +1912,7 @@ QuickTime-based file formats like MOV and MP4.
 
 =head1 AUTHOR
 
-Copyright 2003-2022, Phil Harvey (philharvey66 at gmail.com)
+Copyright 2003-2021, Phil Harvey (philharvey66 at gmail.com)
 
 This library is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.

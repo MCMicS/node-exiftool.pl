@@ -19,7 +19,7 @@ use strict;
 use vars qw($VERSION $warnString);
 use Image::ExifTool qw(:DataAccess :Utils);
 
-$VERSION = '1.27';
+$VERSION = '1.26';
 
 sub WarnProc($) { $warnString = $_[0]; }
 
@@ -125,7 +125,6 @@ my %iWorkType = (
         Name => 'ZipFileName',
         Format => 'string[$$self{ZipFileNameLength}]',
     },
-    _com => 'ZipFileComment',
 );
 
 # GNU ZIP tags (ref 3)
@@ -381,8 +380,6 @@ sub HandleMember($$;$)
     $et->HandleTag($tagTablePtr, 9, $member->compressedSize());
     $et->HandleTag($tagTablePtr, 11, $member->uncompressedSize());
     $et->HandleTag($tagTablePtr, 15, $member->fileName());
-    my $com = $member->fileComment();
-    $et->HandleTag($tagTablePtr, '_com', $com) if defined $com and length $com;
 }
 
 #------------------------------------------------------------------------------
@@ -451,10 +448,6 @@ sub ProcessZIP($$)
             $et->Warn("$err reading ZIP file");
             last;
         }
-        # extract zip file comment
-        my $comment = $zip->zipfileComment();
-        $et->FoundTag(Comment => $comment) if defined $comment and length $comment;
-
         $$dirInfo{ZIP} = $zip;
 
         # check for an Office Open file (DOCX, etc)
@@ -662,7 +655,6 @@ sub ProcessZIP($$)
             DataLen => 30 + $len,
             DirStart => 0,
             DirLen => 30 + $len,
-            MixedTags => 1, # (to ignore FileComment tag)
         );
         $et->ProcessDirectory(\%dirInfo, $tagTablePtr);
         my $flags = Get16u(\$buff, 6);
@@ -708,7 +700,7 @@ Electronic Publication (EPUB), and Sketch design files (SKETCH).
 
 =head1 AUTHOR
 
-Copyright 2003-2022, Phil Harvey (philharvey66 at gmail.com)
+Copyright 2003-2021, Phil Harvey (philharvey66 at gmail.com)
 
 This library is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
