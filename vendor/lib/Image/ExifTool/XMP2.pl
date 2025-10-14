@@ -16,6 +16,7 @@
 #               11) http://www.extensis.com/en/support/kb_article.jsp?articleNumber=6102211
 #               12) XMPSpecificationPart3_May2013, page 58
 #               13) https://developer.android.com/training/camera2/Dynamic-depth-v1.0.pdf
+#               14) http://www.iptc.org/standards/photo-metadata/iptc-standard/
 #------------------------------------------------------------------------------
 
 package Image::ExifTool::XMP;
@@ -24,6 +25,7 @@ use strict;
 use Image::ExifTool qw(:Utils);
 use Image::ExifTool::XMP;
 
+sub ProcessSEAL($$;$);
 sub Init_crd($);
 
 #------------------------------------------------------------------------------
@@ -100,8 +102,22 @@ my %sPose = (
 my %sEarthPose = (
     STRUCT_NAME => 'EarthPose',
     NAMESPACE => { EarthPose => 'http://ns.google.com/photos/dd/1.0/earthpose/' },
-    Latitude  => { Writable => 'real', Groups => { 2 => 'Location' }, %latConv },
-    Longitude => { Writable => 'real', Groups => { 2 => 'Location' }, %longConv },
+    Latitude  => {
+        Writable => 'real',
+        Groups => { 2 => 'Location' }, 
+        ValueConv    => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
+        ValueConvInv => '$val',
+        PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "N")',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lat")',
+    },
+    Longitude => {
+        Writable => 'real',
+        Groups => { 2 => 'Location' },
+        ValueConv    => 'Image::ExifTool::GPS::ToDegrees($val, 1)',
+        ValueConvInv => '$val',
+        PrintConv    => 'Image::ExifTool::GPS::ToDMS($self, $val, 1, "E")',
+        PrintConvInv => 'Image::ExifTool::GPS::ToDegrees($val, 1, "lon")',
+    },
     Altitude  => {
         Writable => 'real',
         Groups => { 2 => 'Location' },
@@ -154,7 +170,11 @@ my %sAppInfo = (
     %xmpTableDefaults,
     GROUPS => { 1 => 'XMP-xmpDM', 2 => 'Image' },
     NAMESPACE => 'xmpDM',
-    NOTES => 'XMP Dynamic Media namespace tags.',
+    NOTES => q{
+        XMP Dynamic Media namespace tags.  See
+        L<https://developer.adobe.com/xmp/docs/XMPNamespaces/xmpDM/> for the
+        specification.
+    },
     absPeakAudioFilePath=> { },
     album               => { },
     altTapeName         => { },
@@ -223,6 +243,7 @@ my %sAppInfo = (
     fileDataRate    => { Writable => 'rational' },
     genre           => { },
     good            => { Writable => 'boolean' },
+    pick            => { Writable => 'integer' }, #forum15815
     instrument      => { },
     introTime       => { Struct => \%sTime },
     key => {
@@ -385,6 +406,7 @@ my %sLocationDetails = (
     STRUCT_NAME => 'LocationDetails',
     NAMESPACE   => 'Iptc4xmpExt',
     GROUPS      => { 2 => 'Location' },
+    NOTES => 'Note that the GPS elements of this structure are in the "exif" namespace.',
     Identifier  => { List => 'Bag', Namespace => 'xmp' },
     City        => { },
     CountryCode => { },
@@ -401,6 +423,19 @@ my %sLocationDetails = (
         Writable => 'rational',
         PrintConv => '$val =~ /^(inf|undef)$/ ? $val : "$val m"',
         PrintConvInv => '$val=~s/\s*m$//;$val',
+    },
+    GPSAltitudeRef  => {
+        Namespace => 'exif',
+        Writable => 'integer',
+        PrintConv => {
+            OTHER => sub {
+                my ($val, $inv) = @_;
+                return undef unless $inv and $val =~ /^([-+0-9])/;
+                return($1 eq '-' ? 1 : 0);
+            },
+            0 => 'Above Sea Level',
+            1 => 'Below Sea Level',
+        },
     },
 );
 my %sCVTermDetails = (
@@ -530,17 +565,18 @@ my %sImageRegion = ( # new in 1.5
     rRole  => { Namespace => 'Iptc4xmpExt', FlatName => 'Role',  List => 'Bag', Struct => \%sEntity },
 );
 
-# IPTC Extension namespace properties (Iptc4xmpExt) (ref 4)
+# IPTC Extension namespace properties (Iptc4xmpExt) (ref 4, 14)
 %Image::ExifTool::XMP::iptcExt = (
     %xmpTableDefaults,
     GROUPS => { 1 => 'XMP-iptcExt', 2 => 'Author' },
     NAMESPACE   => 'Iptc4xmpExt',
     TABLE_DESC => 'XMP IPTC Extension',
     NOTES => q{
-        This table contains tags defined by the IPTC Extension schema version 1.5. 
-        The actual namespace prefix is "Iptc4xmpExt", but ExifTool shortens this for
-        the family 1 group name. (see
-        L<http://www.iptc.org/standards/photo-metadata/iptc-standard/>)
+        This table contains tags defined by the IPTC Extension schema version 1.7
+        and IPTC Video Metadata version 1.3. The actual namespace prefix is
+        "Iptc4xmpExt", but ExifTool shortens this for the family 1 group name. (See
+        L<http://www.iptc.org/standards/photo-metadata/iptc-standard/> and
+        L<https://iptc.org/standards/video-metadata-hub/>.)
     },
     AboutCvTerm => {
         Struct => \%sCVTermDetails,
@@ -681,6 +717,7 @@ my %sImageRegion = ( # new in 1.5
             ProductName => { Writable => 'lang-alt' },
             ProductGTIN => { },
             ProductDescription => { Writable => 'lang-alt' },
+            ProductId => { }, # added in version 2022.1
         },
         List => 'Bag',
     },
@@ -795,8 +832,16 @@ my %sImageRegion = ( # new in 1.5
     },
     PlanningRef         => { List => 'Bag', Struct => \%sEntityWithRole },
     audioBitsPerSample  => { Groups => { 2 => 'Audio' }, Writable => 'integer' },
+    # new IPTC video metadata 1.3 properties
+    # (ref https://iptc.org/std/videometadatahub/recommendation/IPTC-VideoMetadataHub-props-Rec_1.3.html)
+    metadataLastEdited => { Groups => { 2 => 'Time' }, %dateTimeInfo },
+    metadataLastEditor => { Struct => \%sEntity },
+    metadataAuthority  => { Struct => \%sEntity },
+    parentId           => { Name => 'ParentID' },
     # new IPTC Extension schema 1.5 property
     ImageRegion => { Groups => { 2 => 'Image' }, List => 'Bag', Struct => \%sImageRegion },
+    # new Extension 1.6 property
+    EventId     => { Name => 'EventID', List => 'Bag' },
 );
 
 #------------------------------------------------------------------------------
@@ -832,7 +877,8 @@ my %prismPublicationDate = (
     AVOID => 1,
     NOTES => q{
         Publishing Requirements for Industry Standard Metadata 3.0 namespace
-        tags.  (see L<http://www.prismstandard.org/>)
+        tags.  (see
+        L<https://www.w3.org/Submission/2020/SUBM-prism-20200910/prism-basic.html>)
     },
     academicField   => { }, # (3.0)
     aggregateIssueNumber => { Writable => 'integer' }, # (3.0)
@@ -1051,7 +1097,7 @@ my %prismPublicationDate = (
     NOTES => q{
         PRISM Rights Language 2.1 namespace tags.  These tags have been deprecated
         since the release of the PRISM Usage Rights 3.0. (see
-        L<http://www.prismstandard.org/>)
+        L<https://www.w3.org/submissions/2020/SUBM-prism-20200910/prism-image.html>)
     },
     geography       => { List => 'Bag' },
     industry        => { List => 'Bag' },
@@ -1361,6 +1407,57 @@ my %sSubVersion = (
     Snapshots           => { List => 'Bag', Binary => 1 },
 );
 
+# ACDSee region tags (ref BKW)
+my %sACDSeeDimensions = (
+    STRUCT_NAME => 'ACDSeeDimensions',
+    NAMESPACE   => {'acdsee-stDim' => 'http://ns.acdsee.com/sType/Dimensions#'},
+    'w'         => { Writable => 'real' },
+    'h'         => { Writable => 'real' },
+    'unit'      => { },
+);
+my %sACDSeeArea = (
+    STRUCT_NAME => 'ACDSeeArea',
+    NAMESPACE => { 'acdsee-stArea' => 'http://ns.acdsee.com/sType/Area#' },
+    'x'     => { Writable => 'real' },
+    'y'     => { Writable => 'real' },
+    w       => { Writable => 'real' },
+    h       => { Writable => 'real' },
+);
+my %sACDSeeRegionStruct = (
+    STRUCT_NAME     => 'ACDSeeRegion',
+    NAMESPACE       => 'acdsee-rs',
+    ALGArea         => { Struct => \%sACDSeeArea },
+    DLYArea         => { Struct => \%sACDSeeArea },
+    Name            => { },
+    NameAssignType  => { },
+    Type            => { },
+);
+%Image::ExifTool::XMP::ACDSeeRegions = (
+    GROUPS => { 0 => 'XMP', 1 => 'XMP-acdsee-rs', 2 => 'Image' },
+    NAMESPACE => 'acdsee-rs',
+    WRITABLE => 'string',
+    AVOID => 1,
+    Regions => {
+        Name => 'RegionInfoACDSee',
+        FlatName => 'ACDSee',
+        # the "Struct" entry defines the structure fields
+        Struct => {
+            # optional structure name (used for warning messages only)
+            STRUCT_NAME => 'ACDSeeRegionInfo',
+            NAMESPACE   => 'acdsee-rs',
+            RegionList => {
+                FlatName => 'Region',
+                Struct => \%sACDSeeRegionStruct,
+                List => 'Bag',
+            },
+            AppliedToDimensions => {
+                FlatName => 'RegionAppliedToDimensions',
+                Struct => \%sACDSeeDimensions,
+            },
+        },
+    },
+);
+
 # Picture Licensing Universal System namespace properties (xmpPLUS)
 %Image::ExifTool::XMP::xmpPLUS = (
     %xmpTableDefaults,
@@ -1374,6 +1471,17 @@ my %sSubVersion = (
     },
     CreditLineReq   => { Writable => 'boolean' },
     ReuseAllowed    => { Writable => 'boolean' },
+);
+
+%Image::ExifTool::XMP::panorama = (
+    %xmpTableDefaults,
+    GROUPS => { 1 => 'XMP-panorama', 2 => 'Image' },
+    NAMESPACE => 'panorama',
+    NOTES => 'Adobe Photoshop Panorama-profile tags.',
+    Transformation      => { },
+    VirtualFocalLength  => { Writable => 'real' },
+    VirtualImageXCenter => { Writable => 'real' },
+    VirtualImageYCenter => { Writable => 'real' },
 );
 
 # Creative Commons namespace properties (cc) (ref 5)
@@ -1515,6 +1623,7 @@ my %sSubVersion = (
     ImageHistory           => { Avoid => 1, Notes => 'different format from EXIF:ImageHistory' },
     LensCorrectionSettings => { },
     ImageUniqueID          => { Avoid => 1 },
+    picasawebGPhotoId      => { }, #forum14108
 );
 
 # SWF namespace tags (ref PH)
@@ -1825,7 +1934,7 @@ my %sSubVersion = (
     BurstPrimary    => { },
     PortraitNote    => { },
     PortraitRequest => {
-        Notes => 'High Definition Render Pipeline (HDRP) data', #PH (guess)
+        Notes => 'HDRPlus (HDRP) data', #NealKrawetz
         ValueConv => 'Image::ExifTool::XMP::DecodeBase64($val)',
         ValueConvInv => 'Image::ExifTool::XMP::EncodeBase64($val)',
     },
@@ -1833,6 +1942,7 @@ my %sSubVersion = (
     SpecialTypeID   => { List => 'Bag' },
     PortraitNote    => { },
     DisableAutoCreation => { List => 'Bag' },
+    DisableSuggestedAction => { List => 'Bag' }, #forum16147
     hdrp_makernote => {
         Name => 'HDRPMakerNote',
         # decoded data starts with the following bytes, but nothing yet is known about its contents:
@@ -1844,6 +1954,18 @@ my %sSubVersion = (
     MicroVideoVersion   => { Writable => 'integer' },
     MicroVideoOffset    => { Writable => 'integer' },
     MicroVideoPresentationTimestampUs => { Writable => 'integer' },
+    shot_log_data => { #forum14108
+        Name => 'ShotLogData',
+        ValueConv => 'Image::ExifTool::XMP::DecodeBase64($val)',
+        ValueConvInv => 'Image::ExifTool::XMP::EncodeBase64($val)',
+    },
+    HdrPlusMakernote => {
+        ValueConv => 'Image::ExifTool::XMP::DecodeBase64($val)',
+        ValueConvInv => 'Image::ExifTool::XMP::EncodeBase64($val)',
+    },
+    MotionPhoto        => { Writable => 'integer' },
+    MotionPhotoVersion => { Writable => 'integer' },
+    MotionPhotoPresentationTimestampUs => { Writable => 'integer' },
 );
 
 # Google creations namespace (ref PH)
@@ -1853,6 +1975,7 @@ my %sSubVersion = (
     NAMESPACE => 'GCreations',
     NOTES => 'Google creations tags.',
     CameraBurstID  => { },
+    Type => { Avoid => 1 },
 );
 
 # Google depth-map Device namespace (ref 13)
@@ -1878,7 +2001,8 @@ my %sSubVersion = (
                         Struct => {
                             STRUCT_NAME => 'DeviceItem',
                             NAMESPACE => { Item => 'http://ns.google.com/photos/dd/1.0/item/' },
-                            Mime    => { },
+                            # use this as a key to process Google trailer
+                            Mime    => { RawConv => '$$self{ProcessGoogleTrailer} = $val' },
                             Length  => { Writable => 'integer' },
                             Padding => { Writable => 'integer' },
                             DataURI => { },
@@ -2007,6 +2131,43 @@ my %sSubVersion = (
     },
 );
 
+# Google container tags (ref https://developer.android.com/guide/topics/media/platform/hdr-image-format)
+# NOTE: The namespace prefix used by ExifTool is 'GContainer' instead of 'Container'
+# dueo to a conflict with Google's depth-map Device 'Container' namespace!
+# (see ../pics/GooglePixel8Pro.jpg sample image)
+%Image::ExifTool::XMP::GContainer = (
+    %xmpTableDefaults,
+    GROUPS => { 1 => 'XMP-GContainer', 2 => 'Image' },
+    NAMESPACE => 'GContainer',
+    NOTES => q{
+        Google Container namespace.  ExifTool uses the prefix 'GContainer' instead
+        of 'Container' to avoid a conflict with the Google Device Container
+        namespace.
+    },
+    Directory => {
+        Name => 'ContainerDirectory',
+        FlatName => 'Directory',
+        List => 'Seq',
+        Struct => {
+            STRUCT_NAME => 'Directory',
+            Item => {
+                Namespace => 'GContainer',
+                Struct => {
+                    STRUCT_NAME => 'Item',
+                    # (use 'GItem' to avoid conflict with Google Device Container Item)
+                    NAMESPACE => { GItem => 'http://ns.google.com/photos/1.0/container/item/'},
+                    Mime    => { RawConv => '$$self{ProcessGoogleTrailer} = $val' },
+                    Semantic => { },
+                    Length   => { Writable => 'integer' },
+                    Label    => { },
+                    Padding  => { Writable => 'integer' },
+                    URI      => { },
+                },
+            },
+        },
+    },
+);
+
 # Getty Images namespace (ref PH)
 %Image::ExifTool::XMP::GettyImages = (
     %xmpTableDefaults,
@@ -2056,6 +2217,84 @@ my %sSubVersion = (
     },
 );
 
+# hdr metadata namespace used by ACR 15.1
+%Image::ExifTool::XMP::hdr = (
+    %xmpTableDefaults,
+    GROUPS => { 1 => 'XMP-hdr', 2 => 'Image' },
+    NAMESPACE   => 'hdr_metadata',
+    TABLE_DESC => 'XMP HDR Metadata',
+    NOTES => q{
+        HDR metadata namespace tags written by ACR 15.1.  The actual namespace
+        prefix is "hdr_metadata", which is the prefix recorded in the file, but
+        ExifTool shortens this for the family 1 group name.
+    },
+    ccv_primaries_xy        => { Name => 'CCVPrimariesXY' }, # (comma-separated string of 6 reals)
+    ccv_white_xy            => { Name => 'CCVWhiteXY' }, # (comma-separated string of 2 reals)
+    ccv_min_luminance_nits  => { Name => 'CCVMinLuminanceNits', Writable => 'real' },
+    ccv_max_luminance_nits  => { Name => 'CCVMaxLuminanceNits', Writable => 'real' },
+    ccv_avg_luminance_nits  => { Name => 'CCVAvgLuminanceNits', Writable => 'real' },
+    scene_referred          => { Name => 'SceneReferred', Writable => 'boolean' },
+);
+
+# HDR Gain Map metadata namespace
+%Image::ExifTool::XMP::hdrgm = (
+    %xmpTableDefaults,
+    GROUPS => { 1 => 'XMP-hdrgm', 2 => 'Image' },
+    NAMESPACE   => 'hdrgm',
+    TABLE_DESC => 'XMP HDR Gain Map Metadata',
+    NOTES => 'Tags used in Adobe gain map images.',
+    Version             => { Avoid => 1 },
+    BaseRenditionIsHDR  => { Writable => 'boolean' },
+    # this is a pain in the ass: List items below may or may not be lists
+    # according to the Adobe specification -- I don't know how to handle tags
+    # with a variable format like this, so just make them lists here for now
+    OffsetSDR           => { Writable => 'real', List => 'Seq' },
+    OffsetHDR           => { Writable => 'real', List => 'Seq' },
+    HDRCapacityMin      => { Writable => 'real' },
+    HDRCapacityMax      => { Writable => 'real' },
+    GainMapMin          => { Writable => 'real', List => 'Seq' },
+    GainMapMax          => { Writable => 'real', List => 'Seq' },
+    Gamma               => { Writable => 'real', List => 'Seq', Avoid => 1 },
+);
+
+%Image::ExifTool::XMP::HDRGainMap = (
+    %xmpTableDefaults,
+    GROUPS => { 1 => 'XMP-HDRGainMap', 2 => 'Unknown' },
+    NAMESPACE   => 'HDRGainMap',
+    NOTES => 'Used in Apple HDR GainMap images.',
+    HDRGainMapVersion => {
+        PrintConv => 'IsInt($val) ? join(".",unpack("C*", pack "N", $val)) : $val',
+        PrintConvInv => q{
+            return $val unless $val =~ /^\d+\.\d+\.\d+\.\d+$/;
+            return unpack('N', pack('C*', split /\./, $val));
+        },
+    },
+);
+
+%Image::ExifTool::XMP::apdi = (
+    %xmpTableDefaults,
+    GROUPS => { 1 => 'XMP-apdi', 2 => 'Image' },
+    NAMESPACE   => 'apdi',
+    NOTES => 'Used in Apple HDR GainMap images.',
+    NativeFormat => {
+        PrintConv => q{
+            return $val unless IsInt($val);
+            my $tmp = pack("N", $val);
+            $tmp =~ /^\w{4}$/ ? $tmp : $val;
+        },
+        PrintConvInv => '$val =~ /^\w{4}$/ ? unpack("N", $val) : $val',
+    },
+    AuxiliaryImageType => { },
+    StoredFormat => {
+        PrintConv => q{
+            return $val unless IsInt($val);
+            my $tmp = pack("N", $val);
+            $tmp =~ /^\w{4}$/ ? $tmp : $val;
+        },
+        PrintConvInv => '$val =~ /^\w{4}$/ ? unpack("N", $val) : $val',
+    },
+);
+
 # SVG namespace properties (ref 9)
 %Image::ExifTool::XMP::SVG = (
     GROUPS => { 0 => 'SVG', 1 => 'SVG', 2 => 'Image' },
@@ -2086,7 +2325,79 @@ my %sSubVersion = (
     GROUPS => { 0 => 'SVG', 2 => 'Unknown' },
     LANG_INFO => \&GetLangInfo,
     NAMESPACE => undef, # variable namespace
+    'c2pa:manifest' => {
+        Name => 'JUMBF',
+        Groups => { 0 => 'JUMBF' },
+        RawConv => 'Image::ExifTool::XMP::DecodeBase64($val)',
+        SubDirectory => {
+            TagTable => 'Image::ExifTool::Jpeg2000::Main',
+            ByteOrder => 'BigEndian',
+        },
+    },
 );
+
+%Image::ExifTool::XMP::seal = (
+    GROUPS => { 0 => 'XMP', 1 => 'XMP-seal', 2 => 'Image' },
+    NAMESPACE => 'seal',
+    WRITABLE => 'string',
+    NOTES => 'SEAL embedded in XMP.',
+    seal => {
+        Name => 'Seal',
+        Binary => 1,
+        SubDirectory => { TagTable => 'Image::ExifTool::XMP::SEAL' },
+    },
+);
+
+%Image::ExifTool::XMP::SEAL = (
+    GROUPS => { 0 => 'XML', 1 => 'SEAL', 2 => 'Document' },
+    PROCESS_PROC => \&ProcessSEAL,
+    NOTES => q{
+        These tags are used in SEAL (Secure Evidence Attribution Label) content
+        authentification, which is actually XML format, not XMP.  ExifTool has
+        read/delete support for SEAL information in JPG, TIFF, XMP, PNG, WEBP, HEIC,
+        PPM, MOV and MP4 files, and read-only support in PDF, MKV and WAV.  Use
+        C<-seal:all=> on the command line to delete SEAL information in supported
+        formats.  See L<https://github.com/hackerfactor/SEAL> for the specification.
+    },
+    seal=> 'SEALVersion',
+    ka  => 'KeyAlgorithm',
+    kv  => 'KeyVersion',
+    da  => 'DigestAlgorithm',
+    b   => 'ByteRange',
+    d   => 'Domain',
+    uid => 'UniqueIdentifier',
+    id  => 'Identifier',
+    sf  => 'SignatureFormat',
+    sl  => 'SignatureLength',
+   's'  => 'Signature',
+    info=> 'SEALComment',
+    copyright => { Name => 'Copyright', Groups => { 2 => 'Author' } },
+);
+
+#------------------------------------------------------------------------------
+# We found a SEAL property name/value
+# Inputs: 0) ExifTool ref, 1) tag table ref, 2) xmp property list ref
+#         3) property value, 4) attribute hash ref
+# Returns: 1 if valid tag was found
+sub FoundSEAL($$$$;$)
+{
+    my ($et, $tagTablePtr, $props, $val, $attrs) = @_;
+    # remove 'seal' container property from name
+    my @sealProps = @$props;
+    shift @sealProps if @sealProps and $sealProps[0] eq 'seal';
+    return FoundXMP($et, $tagTablePtr, \@sealProps, $val, $attrs);
+}
+
+#------------------------------------------------------------------------------
+# Process SEAL XML
+# Inputs: 0) ExifTool ref, 1) dirInfo ref, 2) tag table ref
+# Returns: 1 on success
+sub ProcessSEAL($$;$)
+{
+    my ($et, $dirInfo, $tagTablePtr) = @_;
+    $$dirInfo{XMPParseOpts}{FoundProc} = \&FoundSEAL;
+    return ProcessXMP($et, $dirInfo, $tagTablePtr);
+}
 
 #------------------------------------------------------------------------------
 # Generate crd tags
@@ -2123,7 +2434,7 @@ This file contains definitions for less common XMP namespaces.
 
 =head1 AUTHOR
 
-Copyright 2003-2021, Phil Harvey (philharvey66 at gmail.com)
+Copyright 2003-2025, Phil Harvey (philharvey66 at gmail.com)
 
 This library is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.

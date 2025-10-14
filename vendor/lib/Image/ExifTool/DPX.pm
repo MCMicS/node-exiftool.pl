@@ -15,7 +15,7 @@ use strict;
 use vars qw($VERSION);
 use Image::ExifTool qw(:DataAccess :Utils);
 
-$VERSION = '1.05';
+$VERSION = '1.07';
 
 # DPX tags
 %Image::ExifTool::DPX::Main = (
@@ -97,7 +97,7 @@ $VERSION = '1.05';
             3 => 'Logarithmic',
             4 => 'Unspecified video',
             5 => 'SMPTE 274M',
-            6 => 'ITU-R 704-4',
+            6 => 'ITU-R 709-4',
             7 => 'ITU-R 601-5 system B or G (625)',
             8 => 'ITU-R 601-5 system M (525)',
             9 => 'Composite video (NTSC)',
@@ -124,7 +124,7 @@ $VERSION = '1.05';
             1 => 'Printing density',
             4 => 'Unspecified video',
             5 => 'SMPTE 274M',
-            6 => 'ITU-R 704-4',
+            6 => 'ITU-R 709-4',
             7 => 'ITU-R 601-5 system B or G (625)',
             8 => 'ITU-R 601-5 system M (525)',
             9 => 'Composite video (NTSC)',
@@ -156,7 +156,18 @@ $VERSION = '1.05';
     1532=> { Name => 'SourceCreateDate',  Format => 'string[24]' },
     1556=> { Name => 'InputDeviceName',   Format => 'string[32]' },
     1588=> { Name => 'InputDeviceSerialNumber', Format => 'string[32]' },
-    # 1620=> { Name => 'AspectRatio',       Format => 'int32u' },
+    # 1620 => { Name => 'Border',           Format => 'int16u[4]' },
+    1628 => {
+        Name => 'AspectRatio',
+        Format => 'int32u[2]',
+        RawConv => '$val =~ /4294967295/ ? undef : $val', # ignore undefined values
+        PrintConv => q{
+            return 'undef' if $val eq '0 0';
+            return 'inf' if $val=~/ 0$/;
+            my @a=split(' ',$val);
+            return join(':', Rationalize($a[0]/$a[1]));
+        },
+    },
     1724 => { Name => 'OriginalFrameRate',Format => 'float' },
     1728 => { Name => 'ShutterAngle',     Format => 'float', RawConv => '($val =~ /\d/ and $val !~ /nan/i) ? $val : undef' }, #2
     1732 => { Name => 'FrameID',          Format => 'string[32]' },
@@ -214,7 +225,7 @@ metadata from DPX (Digital Picture Exchange) images.
 
 =head1 AUTHOR
 
-Copyright 2003-2021, Phil Harvey (philharvey66 at gmail.com)
+Copyright 2003-2025, Phil Harvey (philharvey66 at gmail.com)
 
 This library is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
